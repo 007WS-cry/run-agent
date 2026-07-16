@@ -2,12 +2,12 @@ from run_agent import compact
 from run_agent.config import MODEL, client, MAX_REACTIVE_RETRIES
 from run_agent.hooks.hooks import trigger_hooks
 from run_agent.memories import load_memories
-from run_agent.prompt import build_system
+from run_agent.prompt import get_system_prompt, update_context
 from run_agent.tools.tools_config import TOOL_HANDLERS, TOOLS
 
 # 本文件负责驱动 Agent 对话循环，将记忆和消息发送给模型、执行本地工具、压缩上下文并写回对话历史。
 
-# 允许测试或嵌入方显式覆盖系统提示词；默认保持 None，使每轮对话都能读取最新技能和记忆索引。
+# 允许测试或嵌入方显式覆盖系统提示词；默认保持 None，使每次模型请求都能按最新运行状态获取提示词。
 SYSTEM: str | None = None
 
 # 记录最近一次有效 TODO 更新之后经历的工具调用轮数，用于定期提醒模型维护任务清单。
@@ -78,7 +78,8 @@ def agent_loop(messages: list) -> None:
     # 记录当前模型请求已经执行的响应式压缩次数；请求成功后重置，使后续工具轮次仍有独立重试机会。
     reactive_retries = 0
     memories_content = load_memories(messages)
-    system = SYSTEM if SYSTEM is not None else build_system()
+    # 保存跨工具轮次复用的系统提示词上下文；每次请求前按真实状态刷新，并由提示词模块判断是否命中缓存。
+    prompt_context = {}
     while True:
         # 连续三个工具调用轮次没有更新 TODO 时插入提醒，并重新开始计算下一次提醒间隔。
         if rounds_since_todo >= 3 and messages:
@@ -89,6 +90,11 @@ def agent_loop(messages: list) -> None:
             rounds_since_todo = 0
         messages[:] = [_make_json_safe(message) for message in messages]
         messages[:] = compact.prepare_history(messages)
+        if SYSTEM is None:
+            prompt_context = update_context(prompt_context, messages)
+            system = get_system_prompt(prompt_context)
+        else:
+            system = SYSTEM
         try:
             request_messages = _inject_memories(messages, memories_content)
             response = client.messages.create(

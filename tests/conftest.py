@@ -22,7 +22,7 @@ class FakeContentBlock(SimpleNamespace):
 @pytest.fixture
 # 创建隔离的文件工具工作区；利用 pytest 临时目录并替换模块常量，使每个测试只操作自己的目录。
 def workspace(tmp_path, monkeypatch):
-    from run_agent import tools
+    from run_agent.tools import tools
 
     root = tmp_path.resolve()
     monkeypatch.setattr(tools, "WORKDIR", root)

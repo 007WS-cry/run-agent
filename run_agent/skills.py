@@ -1,6 +1,6 @@
 import yaml
 
-from run_agent.tools import WORKDIR
+from run_agent.config import WORKDIR
 
 # 本文件负责发现工作区 resources/skills 下的技能清单、解析 YAML frontmatter，并按需返回完整技能说明。
 

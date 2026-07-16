@@ -46,3 +46,7 @@ managed-files/
 *.log
 *.tmp
 *.bak
+
+# Agent 上下文压缩与大工具输出的本地产物
+.transcripts/
+.task_outputs/

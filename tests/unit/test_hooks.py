@@ -1,8 +1,8 @@
 from types import SimpleNamespace
 from unittest.mock import Mock
 
-from run_agent import hooks
 from run_agent import runtime
+from run_agent.hooks import hooks
 
 # 本文件对生命周期钩子进行单元测试，验证命令拦截、人工确认、日志告警、上下文提示及运行时阻断流程。
 

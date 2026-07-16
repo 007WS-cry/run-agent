@@ -1,5 +1,6 @@
-from run_agent.config import DESTRUCTIVE, DENY_LIST, HOOKS
-from run_agent.tools import WORKDIR
+from run_agent.config import DESTRUCTIVE, DENY_LIST
+from run_agent.config import WORKDIR
+from run_agent.hooks.hooks_config import HOOKS
 
 # 本文件实现 Agent 生命周期钩子，包括命令权限检查、工具调用日志、输出告警、上下文提示和会话汇总。
 

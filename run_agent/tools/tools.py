@@ -1,15 +1,10 @@
-import os
 import shutil
 import subprocess
 from pathlib import Path
 
+from run_agent.config import WORKDIR
+
 # 本文件实现 Agent 可调用的本地工具，通过工作区路径校验和统一的错误返回完成命令执行及文件增删改查。
-
-# 在模块加载时记录工作区的规范化绝对路径，后续文件工具和系统提示词共用该访问边界。
-WORKDIR = Path.cwd().resolve()
-
-# 在内存中保存最近一次由 todo_write 提交的完整任务清单，新的有效调用会整体替换旧内容。
-CURRENT_TODOS: list[dict[str, str]] = []
 
 # 解析并校验目标路径；将输入拼接到工作区后规范化，再用父子路径关系阻止访问工作区之外的位置。
 def safe_path(path: str) -> Path:
@@ -23,15 +18,19 @@ def safe_path(path: str) -> Path:
 
 # 执行 Shell 命令并返回输出；先用关键字拦截明显危险命令，再通过子进程限时运行并合并标准输出与错误输出。
 def run_bash(command: str) -> str:
+    if not isinstance(command, str):
+        return "Error: command must be a string"
+
     dangerous = ["rm -rf /", "sudo", "shutdown", "reboot", "> /dev/"]
-    if any(pattern in command for pattern in dangerous):
+    normalized_command = command.casefold()
+    if any(pattern.casefold() in normalized_command for pattern in dangerous):
         return "Error: Dangerous command blocked"
 
     try:
         result = subprocess.run(
             command,
             shell=True,
-            cwd=os.getcwd(),
+            cwd=WORKDIR,
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -48,7 +47,9 @@ def run_bash(command: str) -> str:
 # 读取工作区内的 UTF-8 文本文件；先校验路径，再按可选行数截断内容并将异常转换为统一错误字符串。
 def run_read_file(path: str, limit: int | None = None) -> str:
     try:
-        if limit is not None and limit < 1:
+        if limit is not None and (
+            isinstance(limit, bool) or not isinstance(limit, int) or limit < 1
+        ):
             return "Error: limit must be a positive integer"
 
         content = safe_path(path).read_text(encoding="utf-8", errors="replace")
@@ -135,33 +136,3 @@ def run_move_file(old_path: str, new_path: str) -> str:
         return f"Moved {old_path} to {new_path}"
     except Exception as error:
         return f"Error: {error}"
-
-# 校验并整体更新当前任务清单；所有条目合法后才替换全局状态，同时在终端打印便于阅读的任务视图。
-def run_todo_write(todos: list) -> str:
-    global CURRENT_TODOS
-
-    if not isinstance(todos, list):
-        return "Error: todos must be a list"
-
-    status_icons = {"pending": " ", "in_progress": "▸", "completed": "✓"}
-    normalized_todos = []
-    for index, todo in enumerate(todos):
-        if not isinstance(todo, dict):
-            return f"Error: todo at index {index} must be an object"
-
-        content = todo.get("content")
-        status = todo.get("status")
-        if not isinstance(content, str) or not content.strip():
-            return f"Error: todo at index {index} must have non-empty content"
-        if not isinstance(status, str) or status not in status_icons:
-            return f"Error: todo at index {index} has invalid status"
-
-        normalized_todos.append({"content": content, "status": status})
-
-    CURRENT_TODOS = normalized_todos
-    lines = ["\n## Current Tasks"]
-    for todo in CURRENT_TODOS:
-        icon = status_icons[todo["status"]]
-        lines.append(f"  [{icon}] {todo['content']}")
-    print("\n".join(lines))
-    return f"Updated {len(CURRENT_TODOS)} tasks"

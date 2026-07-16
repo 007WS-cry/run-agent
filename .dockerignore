@@ -30,6 +30,8 @@ managed-files
 .coverage.*
 coverage.xml
 htmlcov
+.transcripts
+.task_outputs
 
 # 密钥、日志与非运行时文档
 .env

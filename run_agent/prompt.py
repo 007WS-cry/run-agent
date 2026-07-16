@@ -1,5 +1,5 @@
+from run_agent.config import WORKDIR
 from run_agent.skills import list_skills, scan_skills
-from run_agent.tools import WORKDIR
 
 # 本文件负责组合 Agent 的系统提示词，并在构建提示词前加载工作区内可用的技能目录。
 

@@ -1,6 +1,7 @@
 import pytest
 
-from run_agent import config, prompt, skills
+from run_agent import prompt, skills
+from run_agent.tools import tools_config
 
 # 本文件对 skills 扩展进行单元测试，通过临时技能目录覆盖 frontmatter 解析、扫描、目录生成、按需加载和工具注册。
 
@@ -125,10 +126,12 @@ def test_build_system_scans_and_includes_skill_catalog(isolated_skill_registry):
 
 # 验证 load_skill 工具声明限制名称参数，且处理器映射保存函数本身而不是在导入阶段提前调用。
 def test_load_skill_tool_schema_and_handler_are_registered():
-    skill_tool = next(tool for tool in config.TOOLS if tool["name"] == "load_skill")
+    skill_tool = next(
+        tool for tool in tools_config.TOOLS if tool["name"] == "load_skill"
+    )
     schema = skill_tool["input_schema"]
 
-    assert config.TOOL_HANDLERS["load_skill"] is skills.load_skill
+    assert tools_config.TOOL_HANDLERS["load_skill"] is skills.load_skill
     assert schema["required"] == ["name"]
     assert schema["additionalProperties"] is False
     assert schema["properties"]["name"]["minLength"] == 1

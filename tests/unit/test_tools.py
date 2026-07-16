@@ -1,11 +1,10 @@
-import os
 import subprocess
 from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
 
-from run_agent import tools
+from run_agent.tools import tools
 
 # 本文件对全部本地工具进行单元测试，通过隔离工作区和模拟子进程验证路径安全、文件操作、命令拦截及异常处理。
 
@@ -38,6 +37,8 @@ def test_write_and_read_file_with_line_limit(workspace):
     assert tools.run_read_file(path) == content
     assert tools.run_read_file(path, limit=2) == "first\nsecond\n... (1 more lines)"
     assert tools.run_read_file(path, limit=0) == "Error: limit must be a positive integer"
+    assert tools.run_read_file(path, limit=True) == "Error: limit must be a positive integer"
+    assert tools.run_read_file(path, limit="2") == "Error: limit must be a positive integer"
 
 # 验证文本编辑只替换首次匹配；准备重复内容后检查替换结果，并覆盖文本不存在和旧文本为空的错误分支。
 def test_edit_file_replaces_only_first_occurrence(workspace):
@@ -121,7 +122,7 @@ def test_run_bash_combines_stdout_and_stderr(monkeypatch):
     run.assert_called_once_with(
         "example command",
         shell=True,
-        cwd=os.getcwd(),
+        cwd=tools.WORKDIR,
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -141,7 +142,14 @@ def test_run_bash_reports_empty_output(monkeypatch):
 
 @pytest.mark.parametrize(
     "command",
-    ["sudo whoami", "shutdown now", "reboot", "rm -rf /", "echo x > /dev/null"],
+    [
+        "sudo whoami",
+        "SUDO whoami",
+        "shutdown now",
+        "reboot",
+        "rm -rf /",
+        "echo x > /dev/null",
+    ],
 )
 # 验证明显危险命令会在执行前被拦截；参数化危险模式并确认子进程方法从未被调用。
 def test_run_bash_blocks_dangerous_commands(monkeypatch, command):
@@ -150,6 +158,16 @@ def test_run_bash_blocks_dangerous_commands(monkeypatch, command):
 
     assert tools.run_bash(command) == "Error: Dangerous command blocked"
     run.assert_not_called()
+
+
+# 验证非字符串 Shell 参数会返回明确错误，避免在危险命令检查阶段抛出属性异常。
+def test_run_bash_rejects_non_string_command(monkeypatch):
+    run = Mock()
+    monkeypatch.setattr(tools.subprocess, "run", run)
+
+    assert tools.run_bash(None) == "Error: command must be a string"
+    run.assert_not_called()
+
 
 # 验证 Shell 命令超时会转换为可读错误；让模拟子进程抛出超时异常并检查固定的超时提示。
 def test_run_bash_reports_timeout(monkeypatch):

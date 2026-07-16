@@ -20,12 +20,15 @@ dist/
 
 # 测试、覆盖率与静态检查缓存
 .pytest_cache/
+.pytest_tmp/
+.tmp/
 .mypy_cache/
 .ruff_cache/
 .tox/
 .nox/
 .coverage
 .coverage.*
+coverage.xml
 htmlcov/
 
 # 编辑器与操作系统文件
@@ -35,6 +38,8 @@ htmlcov/
 *.swo
 .DS_Store
 Thumbs.db
+
+# 本地 Agent 测试文件
 managed-files/
 
 # 日志与临时文件

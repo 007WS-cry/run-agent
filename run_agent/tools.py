@@ -3,12 +3,13 @@ import shutil
 import subprocess
 from pathlib import Path
 
+# 本文件实现 Agent 可调用的本地工具，通过工作区路径校验和统一的错误返回完成命令执行及文件增删改查。
 
+# 在模块加载时记录工作区的绝对路径，后续所有专用文件工具都以此作为访问边界。
 WORKDIR = Path.cwd().resolve()
 
-
+# 解析并校验目标路径；将输入拼接到工作区后规范化，再用父子路径关系阻止访问工作区之外的位置。
 def safe_path(path: str) -> Path:
-    """Resolve a path and ensure it stays inside the workspace."""
     if not isinstance(path, str) or not path.strip():
         raise ValueError("Path must be a non-empty string")
 
@@ -17,7 +18,7 @@ def safe_path(path: str) -> Path:
         raise ValueError(f"Path escapes workspace: {path}")
     return resolved_path
 
-
+# 执行 Shell 命令并返回输出；先用关键字拦截明显危险命令，再通过子进程限时运行并合并标准输出与错误输出。
 def run_bash(command: str) -> str:
     dangerous = ["rm -rf /", "sudo", "shutdown", "reboot", "> /dev/"]
     if any(pattern in command for pattern in dangerous):
@@ -41,7 +42,7 @@ def run_bash(command: str) -> str:
     except (FileNotFoundError, OSError) as error:
         return f"Error: {error}"
 
-
+# 读取工作区内的 UTF-8 文本文件；先校验路径，再按可选行数截断内容并将异常转换为统一错误字符串。
 def run_read_file(path: str, limit: int | None = None) -> str:
     try:
         if limit is not None and limit < 1:
@@ -59,7 +60,7 @@ def run_read_file(path: str, limit: int | None = None) -> str:
     except Exception as error:
         return f"Error: {error}"
 
-
+# 编辑工作区内的文本文件；读取完整内容后只替换首次出现的目标文本，并通过统一错误字符串反馈失败原因。
 def run_edit_file(path: str, old_text: str, new_text: str) -> str:
     try:
         if not old_text:
@@ -78,7 +79,7 @@ def run_edit_file(path: str, old_text: str, new_text: str) -> str:
     except Exception as error:
         return f"Error: {error}"
 
-
+# 创建或覆盖工作区内的文本文件；校验路径后递归创建父目录，以 UTF-8 写入内容并返回实际字节数。
 def run_write_file(path: str, content: str) -> str:
     try:
         file_path = safe_path(path)
@@ -89,7 +90,7 @@ def run_write_file(path: str, content: str) -> str:
     except Exception as error:
         return f"Error: {error}"
 
-
+# 删除工作区内的单个文件；校验路径并显式拒绝目录后调用文件删除操作，同时将异常转换为错误字符串。
 def run_delete_file(path: str) -> str:
     try:
         file_path = safe_path(path)
@@ -100,7 +101,7 @@ def run_delete_file(path: str) -> str:
     except Exception as error:
         return f"Error: {error}"
 
-
+# 复制工作区内的文件；分别校验源路径和目标路径，拒绝覆盖现有目标并保留源文件元数据。
 def run_copy_file(old_path: str, new_path: str) -> str:
     try:
         source = safe_path(old_path)
@@ -116,7 +117,7 @@ def run_copy_file(old_path: str, new_path: str) -> str:
     except Exception as error:
         return f"Error: {error}"
 
-
+# 移动或重命名工作区内的文件；校验两端路径并拒绝覆盖后创建父目录，再通过文件系统移动源文件。
 def run_move_file(old_path: str, new_path: str) -> str:
     try:
         source = safe_path(old_path)

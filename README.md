@@ -18,6 +18,7 @@ Run Agent 是一个用于学习 AI Agent 基本工作方式的轻量项目。程
 - 单次工具输出最多返回 50,000 个字符
 - 支持 `.env` 环境变量和自定义 Anthropic API 地址
 - 提供非 root 用户运行的 Docker 环境
+- 使用 pytest 提供相互隔离的单元测试和 Agent 工具流集成测试
 
 ## 工具说明
 
@@ -43,7 +44,16 @@ run-agent/
 │   ├── config.py        # 环境变量、API 客户端及工具定义
 │   ├── runtime.py       # Agent 调用循环
 │   └── tools.py         # 路径校验及所有本地工具实现
-├── requirements.txt     # Python 依赖
+├── tests/
+│   ├── unit/
+│   │   ├── test_agent.py            # Agent 运行时单元测试
+│   │   └── test_tools.py            # 本地工具单元测试
+│   ├── integration/
+│   │   └── test_agent_tool_flow.py  # Agent 与文件工具集成测试
+│   └── conftest.py                   # 公共夹具和模拟对象
+├── pytest.ini            # pytest 测试发现与临时目录配置
+├── requirements.txt      # 运行依赖
+├── requirements-dev.txt  # 运行依赖与测试依赖
 ├── .env.example         # 环境变量示例
 ├── Dockerfile           # 容器镜像定义
 ├── .dockerignore        # Docker 构建忽略规则
@@ -116,6 +126,29 @@ python main.py
 
 输入问题并按回车发送；输入 `q`、`exit` 或空行退出。
 
+## 运行测试
+
+测试依赖与运行依赖分开维护。首次测试前安装开发依赖：
+
+```powershell
+python -m pip install -r requirements-dev.txt
+```
+
+运行全部测试：
+
+```powershell
+python -m pytest tests -v
+```
+
+也可以分别运行单元测试和集成测试：
+
+```powershell
+python -m pytest tests/unit -v
+python -m pytest tests/integration -v
+```
+
+测试通过临时目录隔离文件操作，并模拟 Anthropic 客户端，因此不会访问真实模型 API，也不会改动项目中的业务文件。`pytest.ini` 会把临时测试文件放在项目内的 `.pytest_tmp` 目录，该目录已被 Git 和 Docker 忽略。
+
 ## Docker 运行
 
 构建镜像：
@@ -123,6 +156,8 @@ python main.py
 ```powershell
 docker build -t run-agent .
 ```
+
+Docker 镜像只安装 `requirements.txt` 中的运行依赖；测试源码、pytest 配置、开发依赖和测试缓存会被 `.dockerignore` 排除，以减小生产镜像的构建上下文。
 
 推荐把当前目录以只读方式挂载到容器的 `/workspace`：
 
@@ -164,6 +199,16 @@ docker run --rm -it --env-file .env -v "D:\path\to\workspace:/workspace:ro" run-
 ### API 返回鉴权错误
 
 检查 `ANTHROPIC_API_KEY` 是否正确。如果使用自定义服务，同时确认 `ANTHROPIC_BASE_URL` 与该服务的接口格式兼容。
+
+### pytest 提示系统临时目录拒绝访问
+
+项目中的 `pytest.ini` 已将临时目录设置为可写的 `.pytest_tmp`。请在项目根目录运行测试：
+
+```powershell
+python -m pytest tests -v
+```
+
+如果命令仍然使用 `C:\Users\用户名\AppData\Local\Temp`，确认当前目录中存在 `pytest.ini`，并且没有通过环境变量或命令行参数覆盖其中的 `--basetemp` 配置。
 
 ### Docker 容器无法修改文件
 

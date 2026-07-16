@@ -1,6 +1,8 @@
 from run_agent.config import client, MODEL, SYSTEM, TOOLS, TOOL_HANDLERS
 
+# 本文件负责驱动 Agent 对话循环，将消息发送给模型、执行模型请求的本地工具，并把执行结果写回对话历史。
 
+# 修复字符串中的非法代理字符；先检测代理码位，仅在发现异常时通过 UTF-16 往返编码将其替换为安全字符。
 def _repair_unicode(text: str) -> str:
     if not any(0xD800 <= ord(character) <= 0xDFFF for character in text):
         return text
@@ -9,7 +11,7 @@ def _repair_unicode(text: str) -> str:
         errors="replace",
     )
 
-
+# 将任意消息值递归转换为可安全序列化的结构；逐层处理字符串、容器和 SDK 模型对象，最终得到基础 Python 数据。
 def _make_json_safe(value):
     if isinstance(value, str):
         return _repair_unicode(value)
@@ -26,7 +28,7 @@ def _make_json_safe(value):
         return _make_json_safe(model_dump(exclude_none=True))
     return value
 
-
+# 执行完整的 Agent 调用循环；反复请求模型、分发工具调用并追加工具结果，直到模型不再请求工具时结束。
 def agent_loop(messages: list) -> None:
     while True:
         messages[:] = [_make_json_safe(message) for message in messages]

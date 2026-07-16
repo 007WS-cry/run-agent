@@ -1,20 +1,37 @@
+# 版本控制、编辑器与本地环境
 .git
 .gitignore
 .idea
 .vscode
 .venv
 venv
+
+# Python 缓存与构建产物
 __pycache__
 *.py[cod]
 *.pyd
+*.egg-info
+build
+dist
+
+# 测试源码、开发依赖与测试产物
+tests
+pytest.ini
+requirements-dev.txt
+managed-files
 .pytest_cache
+.pytest_tmp
+.tmp
+.tox
+.nox
 .mypy_cache
 .ruff_cache
 .coverage
+.coverage.*
+coverage.xml
 htmlcov
-build
-dist
-*.egg-info
+
+# 密钥、日志与非运行时文档
 .env
 .env.*
 !.env.example

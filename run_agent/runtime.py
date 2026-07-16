@@ -3,6 +3,14 @@ from run_agent.config import MODEL, client, MAX_REACTIVE_RETRIES
 from run_agent.hooks.hooks import trigger_hooks
 from run_agent.memories import load_memories
 from run_agent.prompt import get_system_prompt, update_context
+from run_agent.recovery import (
+    CONTINUATION_PROMPT,
+    ESCALATED_MAX_TOKENS,
+    MAX_RECOVERY_RETRIES,
+    RecoveryState,
+    is_prompt_too_long_error,
+    with_retry,
+)
 from run_agent.tools.tools_config import TOOL_HANDLERS, TOOLS
 
 # 本文件负责驱动 Agent 对话循环，将记忆和消息发送给模型、执行本地工具、压缩上下文并写回对话历史。
@@ -40,19 +48,6 @@ def _make_json_safe(value):
     return value
 
 
-# 判断接口异常是否表示上下文长度溢出；同时检查异常文本和 SDK 提供的结构化响应体。
-def _is_context_overflow_error(error: Exception) -> bool:
-    error_text = f"{error} {getattr(error, 'body', '')}".casefold()
-    markers = (
-        "context window",
-        "context_length_exceeded",
-        "maximum context length",
-        "prompt is too long",
-        "too many tokens",
-    )
-    return any(marker in error_text for marker in markers)
-
-
 # 将相关记忆附加到最近一条文本用户消息的请求副本中，不修改用于展示、压缩和持久化的原始历史。
 def _inject_memories(messages: list[dict], memories_content: str) -> list[dict]:
     if not memories_content:
@@ -75,8 +70,8 @@ def _inject_memories(messages: list[dict], memories_content: str) -> list[dict]:
 def agent_loop(messages: list) -> None:
     global rounds_since_todo
 
-    # 记录当前模型请求已经执行的响应式压缩次数；请求成功后重置，使后续工具轮次仍有独立重试机会。
-    reactive_retries = 0
+    # 保存本次循环内的模型、输出上限和各恢复路径进度，确保同类故障不会无限重试。
+    recovery_state = RecoveryState(current_model=_repair_unicode(MODEL))
     memories_content = load_memories(messages)
     # 保存跨工具轮次复用的系统提示词上下文；每次请求前按真实状态刷新，并由提示词模块判断是否命中缓存。
     prompt_context = {}
@@ -97,24 +92,49 @@ def agent_loop(messages: list) -> None:
             system = SYSTEM
         try:
             request_messages = _inject_memories(messages, memories_content)
-            response = client.messages.create(
-                model=_repair_unicode(MODEL),
-                system=_make_json_safe(system),
-                messages=request_messages,
-                tools=_make_json_safe(TOOLS),
-                max_tokens=8000,
+            response = with_retry(
+                lambda: client.messages.create(
+                    model=recovery_state.current_model,
+                    system=_make_json_safe(system),
+                    messages=request_messages,
+                    tools=_make_json_safe(TOOLS),
+                    max_tokens=recovery_state.max_tokens,
+                ),
+                recovery_state,
             )
-            reactive_retries = 0
         except Exception as error:
             # 只对明确的上下文溢出按配置次数执行响应式压缩；其他接口异常保持原样交给调用方处理。
             if (
-                reactive_retries >= MAX_REACTIVE_RETRIES
-                or not _is_context_overflow_error(error)
+                recovery_state.reactive_compact_count >= MAX_REACTIVE_RETRIES
+                or not is_prompt_too_long_error(error)
             ):
                 raise
             messages[:] = compact.reactive_compact(messages)
-            reactive_retries += 1
+            recovery_state.has_attempted_reactive_compact = True
+            recovery_state.reactive_compact_count += 1
             continue
+
+        # 首次输出截断时丢弃不完整内容并提高上限；再次截断后保存内容并通过续写提示最多恢复三次。
+        if response.stop_reason == "max_tokens":
+            if not recovery_state.has_escalated:
+                recovery_state.max_tokens = ESCALATED_MAX_TOKENS
+                recovery_state.has_escalated = True
+                print(
+                    "[recover] output truncated; max_tokens escalated to "
+                    f"{ESCALATED_MAX_TOKENS}"
+                )
+                continue
+
+            messages.append({
+                "role": "assistant",
+                "content": _make_json_safe(response.content),
+            })
+            if recovery_state.recovery_count >= MAX_RECOVERY_RETRIES:
+                return
+            messages.append({"role": "user", "content": CONTINUATION_PROMPT})
+            recovery_state.recovery_count += 1
+            continue
+
         messages.append({
             "role": "assistant",
             "content": _make_json_safe(response.content),

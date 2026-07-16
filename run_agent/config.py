@@ -43,6 +43,9 @@ client = Anthropic(base_url=os.getenv("ANTHROPIC_BASE_URL"))
 # 从环境变量取得运行时和历史摘要共同使用的模型编号。
 MODEL = os.environ["MODEL_ID"]
 
+# 从环境变量取得可选备用模型编号；连续遇到服务过载时运行时会切换到该模型。
+FALLBACK_MODEL = os.getenv("FALLBACK_MODEL_ID") or None
+
 # 配置 Shell 命令硬禁止列表；命中任意片段时不向用户询问，直接拒绝执行。
 DENY_LIST = ["rm -rf /", "sudo", "shutdown", "reboot", "mkfs", "dd if="]
 

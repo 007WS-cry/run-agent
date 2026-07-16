@@ -1,7 +1,17 @@
 import os
 from anthropic import Anthropic
 from dotenv import load_dotenv
-from run_agent.tools import run_bash, run_read_file, run_edit_file, run_write_file, run_delete_file, run_copy_file, run_move_file
+from run_agent.tools import (
+    WORKDIR,
+    run_bash,
+    run_copy_file,
+    run_delete_file,
+    run_edit_file,
+    run_move_file,
+    run_read_file,
+    run_todo_write,
+    run_write_file,
+)
 
 # 本文件负责加载环境变量、初始化 Anthropic 客户端，并集中定义模型参数、系统提示词、工具描述和处理器映射。
 
@@ -18,7 +28,7 @@ client = Anthropic(base_url=os.getenv("ANTHROPIC_BASE_URL"))
 MODEL = os.environ["MODEL_ID"]
 
 # 定义 Agent 的职责、工作区边界和回复语言要求，供每次模型请求统一使用。
-SYSTEM = f"You are an educational file-management agent that helps users safely explore the workspace rooted at {os.getcwd()} by listing directories, locating files, inspecting file metadata, and reading or explaining file contents while clearly describing each operation and never accessing paths outside the workspace.Your final answer must always be written in the same language as the user’s query."
+SYSTEM = f"You are an educational file-management agent that helps users safely explore the workspace rooted at {WORKDIR} by listing directories, locating files, inspecting file metadata, and reading or explaining file contents while clearly describing each operation and never accessing paths outside the workspace.Your final answer must always be written in the same language as the user’s query."
 
 # 使用 Anthropic 工具调用格式声明全部可用工具及其参数约束，让模型能够生成结构化调用请求。
 TOOLS = [
@@ -145,6 +155,39 @@ TOOLS = [
             },
             "required": ["old_path", "new_path"],
         }
+    },
+    # 声明用于整体替换当前任务清单的 TODO 工具，并限制每个任务必须包含内容和合法状态。
+    {
+        "name": "todo_write",
+        "description": "Create or replace the current todo list to track multi-step work and display its latest state.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "todos": {
+                    "type": "array",
+                    "description": "The complete todo list that replaces the previous list.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "content": {
+                                "type": "string",
+                                "minLength": 1,
+                                "description": "A concise description of the task.",
+                            },
+                            "status": {
+                                "type": "string",
+                                "enum": ["pending", "in_progress", "completed"],
+                                "description": "The current task state.",
+                            },
+                        },
+                        "required": ["content", "status"],
+                        "additionalProperties": False,
+                    }
+                },
+            },
+            "required": ["todos"],
+            "additionalProperties": False,
+        }
     }
 ]
 
@@ -157,6 +200,7 @@ TOOL_HANDLERS = {
     "copy_file": run_copy_file,
     "move_file": run_move_file,
     "delete_file": run_delete_file,
+    "todo_write": run_todo_write,
 }
 
 # 定义生命周期事件与回调列表的注册表，hooks 模块会按事件名称向其中追加处理函数。

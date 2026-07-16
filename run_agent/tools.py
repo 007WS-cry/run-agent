@@ -5,8 +5,11 @@ from pathlib import Path
 
 # 本文件实现 Agent 可调用的本地工具，通过工作区路径校验和统一的错误返回完成命令执行及文件增删改查。
 
-# 在模块加载时记录工作区的绝对路径，后续所有专用文件工具都以此作为访问边界。
+# 在模块加载时记录工作区的规范化绝对路径，后续文件工具和系统提示词共用该访问边界。
 WORKDIR = Path.cwd().resolve()
+
+# 在内存中保存最近一次由 todo_write 提交的完整任务清单，新的有效调用会整体替换旧内容。
+CURRENT_TODOS: list[dict[str, str]] = []
 
 # 解析并校验目标路径；将输入拼接到工作区后规范化，再用父子路径关系阻止访问工作区之外的位置。
 def safe_path(path: str) -> Path:
@@ -132,3 +135,33 @@ def run_move_file(old_path: str, new_path: str) -> str:
         return f"Moved {old_path} to {new_path}"
     except Exception as error:
         return f"Error: {error}"
+
+# 校验并整体更新当前任务清单；所有条目合法后才替换全局状态，同时在终端打印便于阅读的任务视图。
+def run_todo_write(todos: list) -> str:
+    global CURRENT_TODOS
+
+    if not isinstance(todos, list):
+        return "Error: todos must be a list"
+
+    status_icons = {"pending": " ", "in_progress": "▸", "completed": "✓"}
+    normalized_todos = []
+    for index, todo in enumerate(todos):
+        if not isinstance(todo, dict):
+            return f"Error: todo at index {index} must be an object"
+
+        content = todo.get("content")
+        status = todo.get("status")
+        if not isinstance(content, str) or not content.strip():
+            return f"Error: todo at index {index} must have non-empty content"
+        if not isinstance(status, str) or status not in status_icons:
+            return f"Error: todo at index {index} has invalid status"
+
+        normalized_todos.append({"content": content, "status": status})
+
+    CURRENT_TODOS = normalized_todos
+    lines = ["\n## Current Tasks"]
+    for todo in CURRENT_TODOS:
+        icon = status_icons[todo["status"]]
+        lines.append(f"  [{icon}] {todo['content']}")
+    print("\n".join(lines))
+    return f"Updated {len(CURRENT_TODOS)} tasks"

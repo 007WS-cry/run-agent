@@ -1,6 +1,9 @@
 from run_agent.config import client, MODEL, SYSTEM, TOOLS, TOOL_HANDLERS
 from run_agent.hooks import trigger_hooks
 
+# 记录最近一次有效 TODO 更新之后经历的工具调用轮数，用于定期提醒模型维护任务清单。
+rounds_since_todo = 0
+
 # 本文件负责驱动 Agent 对话循环，将消息发送给模型、执行模型请求的本地工具，并把执行结果写回对话历史。
 
 # 修复字符串中的非法代理字符；先检测代理码位，仅在发现异常时通过 UTF-16 往返编码将其替换为安全字符。
@@ -31,7 +34,15 @@ def _make_json_safe(value):
 
 # 执行完整的 Agent 调用循环；反复请求模型、分发工具调用并追加工具结果，直到模型不再请求工具时结束。
 def agent_loop(messages: list) -> None:
+    global rounds_since_todo
     while True:
+        # 连续三个工具调用轮次没有更新 TODO 时插入提醒，并重新开始计算下一次提醒间隔。
+        if rounds_since_todo >= 3 and messages:
+            messages.append({
+                "role": "user",
+                "content": "<reminder>Update your todos.</reminder>",
+            })
+            rounds_since_todo = 0
         messages[:] = [_make_json_safe(message) for message in messages]
         response = client.messages.create(
             model=_repair_unicode(MODEL),
@@ -51,6 +62,8 @@ def agent_loop(messages: list) -> None:
                 messages.append({"role": "user", "content": str(force)})
                 continue
             return
+        # 每次模型返回工具调用都视为一个执行轮次；有效的 todo_write 会在执行后把计数器清零。
+        rounds_since_todo += 1
         results = []
         for block in response.content:
             if block.type != "tool_use":
@@ -70,6 +83,9 @@ def agent_loop(messages: list) -> None:
             output = _make_json_safe(output)
             # 工具执行成功后触发后置钩子，用于观察输出规模等信息，但不改变原始工具结果。
             trigger_hooks("PostToolUse", block, output)
+            # 只有成功更新任务清单才重置提醒计数，错误结果仍保留已经累计的轮次。
+            if block.name == "todo_write" and not str(output).startswith("Error:"):
+                rounds_since_todo = 0
             print(str(output)[:200])
             results.append({
                 "type": "tool_result",

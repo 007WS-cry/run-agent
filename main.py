@@ -1,7 +1,8 @@
 from run_agent.runtime import agent_loop
 from run_agent.hooks import trigger_hooks
+from run_agent.memories import maintain_memories
 
-# 本文件是项目的命令行入口，负责持续读取用户输入、维护对话历史、调用 Agent 循环并输出模型的文本回复。
+# 本文件是项目的命令行入口，负责读取用户输入、维护对话历史、调用 Agent、输出回复并更新持久记忆。
 
 # 仅在直接运行本文件时启动交互流程，作为模块导入时不会自动读取终端输入。
 if __name__ == "__main__":
@@ -31,3 +32,6 @@ if __name__ == "__main__":
                 elif getattr(block, "type", None) == "text":
                     print(block.text)
         print()
+
+        # 最终回答已经展示后提取本轮新增偏好和项目事实，并在达到阈值时合并已有记忆。
+        maintain_memories(history)

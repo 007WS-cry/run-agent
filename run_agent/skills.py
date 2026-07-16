@@ -1,38 +1,10 @@
-import yaml
-
-from run_agent.config import WORKDIR
+from run_agent.config import SKILLS_DIR
+from run_agent.frontmatter_text import parse_frontmatter as _parse_frontmatter
 
 # 本文件负责发现工作区 resources/skills 下的技能清单、解析 YAML frontmatter，并按需返回完整技能说明。
 
-# 定义技能根目录；每个直接子目录可通过其中的 SKILL.md 声明一个技能。
-SKILLS_DIR = WORKDIR / "resources" / "skills"
-
 # 保存本次扫描得到的技能元数据和原始说明，键为技能名称；重新扫描时会整体清空并重建。
 SKILL_REGISTRY: dict[str, dict[str, str]] = {}
-
-
-# 解析 SKILL.md 开头由独立分隔行包围的 YAML frontmatter，并同时返回去除 frontmatter 后的正文。
-def _parse_frontmatter(text: str) -> tuple[dict, str]:
-    lines = text.splitlines()
-    if not lines or lines[0].strip() != "---":
-        return {}, text.strip()
-
-    closing_index = next(
-        (index for index, line in enumerate(lines[1:], start=1) if line.strip() == "---"),
-        None,
-    )
-    if closing_index is None:
-        return {}, ""
-
-    frontmatter = "\n".join(lines[1:closing_index])
-    body = "\n".join(lines[closing_index + 1:]).strip()
-    try:
-        metadata = yaml.safe_load(frontmatter) or {}
-    except yaml.YAMLError:
-        metadata = {}
-    if not isinstance(metadata, dict):
-        metadata = {}
-    return metadata, body
 
 
 # 从技能正文提取首个非空标题或文本作为兜底简介，正文为空时返回统一的缺省说明。

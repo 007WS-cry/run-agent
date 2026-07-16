@@ -32,6 +32,7 @@ coverage.xml
 htmlcov
 .transcripts
 .task_outputs
+resources/memory
 
 # 密钥、日志与非运行时文档
 .env

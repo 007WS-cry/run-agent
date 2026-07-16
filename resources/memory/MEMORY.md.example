@@ -1,0 +1,2 @@
+- [response-language](response-language.md) — 用户希望默认使用中文回答，代码标识符和命令保持原样
+- [project-testing](project-testing.md) — 项目使用 pytest，提交改动前需要运行单元测试和完整测试集

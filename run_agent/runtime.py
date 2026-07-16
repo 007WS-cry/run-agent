@@ -1,13 +1,14 @@
-from run_agent.compact import prepare_history, reactive_compact, persist_large_output
-from run_agent.config import MODEL, client
+from run_agent import compact
+from run_agent.config import MODEL, client, MAX_REACTIVE_RETRIES
 from run_agent.hooks.hooks import trigger_hooks
+from run_agent.memories import load_memories
 from run_agent.prompt import build_system
 from run_agent.tools.tools_config import TOOL_HANDLERS, TOOLS
 
-# 本文件负责驱动 Agent 对话循环，将消息发送给模型、执行本地工具、压缩上下文，并把结果写回对话历史。
+# 本文件负责驱动 Agent 对话循环，将记忆和消息发送给模型、执行本地工具、压缩上下文并写回对话历史。
 
-# 在运行时模块加载时构建系统提示词，使配置模块不再反向依赖提示词和工具模块。
-SYSTEM = build_system()
+# 允许测试或嵌入方显式覆盖系统提示词；默认保持 None，使每轮对话都能读取最新技能和记忆索引。
+SYSTEM: str | None = None
 
 # 记录最近一次有效 TODO 更新之后经历的工具调用轮数，用于定期提醒模型维护任务清单。
 rounds_since_todo = 0
@@ -52,12 +53,32 @@ def _is_context_overflow_error(error: Exception) -> bool:
     return any(marker in error_text for marker in markers)
 
 
+# 将相关记忆附加到最近一条文本用户消息的请求副本中，不修改用于展示、压缩和持久化的原始历史。
+def _inject_memories(messages: list[dict], memories_content: str) -> list[dict]:
+    if not memories_content:
+        return messages
+
+    request_messages = messages.copy()
+    for index in range(len(request_messages) - 1, -1, -1):
+        message = request_messages[index]
+        if message.get("role") != "user" or not isinstance(message.get("content"), str):
+            continue
+        request_messages[index] = {
+            **message,
+            "content": f"{memories_content}\n\n{message['content']}",
+        }
+        return request_messages
+    return messages
+
+
 # 执行完整的 Agent 调用循环；反复请求模型、分发工具调用并追加工具结果，直到模型不再请求工具时结束。
 def agent_loop(messages: list) -> None:
     global rounds_since_todo
 
-    # 每个成功的模型响应都会恢复一次响应式压缩机会，避免同一次溢出在重试失败后进入无限循环。
-    reactive_compaction_used = False
+    # 记录当前模型请求已经执行的响应式压缩次数；请求成功后重置，使后续工具轮次仍有独立重试机会。
+    reactive_retries = 0
+    memories_content = load_memories(messages)
+    system = SYSTEM if SYSTEM is not None else build_system()
     while True:
         # 连续三个工具调用轮次没有更新 TODO 时插入提醒，并重新开始计算下一次提醒间隔。
         if rounds_since_todo >= 3 and messages:
@@ -67,23 +88,27 @@ def agent_loop(messages: list) -> None:
             })
             rounds_since_todo = 0
         messages[:] = [_make_json_safe(message) for message in messages]
-        messages[:] = prepare_history(messages)
+        messages[:] = compact.prepare_history(messages)
         try:
+            request_messages = _inject_memories(messages, memories_content)
             response = client.messages.create(
                 model=_repair_unicode(MODEL),
-                system=_make_json_safe(SYSTEM),
-                messages=messages,
+                system=_make_json_safe(system),
+                messages=request_messages,
                 tools=_make_json_safe(TOOLS),
                 max_tokens=8000,
             )
+            reactive_retries = 0
         except Exception as error:
-            # 只对明确的上下文溢出执行一次响应式压缩；其他接口异常保持原样交给调用方处理。
-            if reactive_compaction_used or not _is_context_overflow_error(error):
+            # 只对明确的上下文溢出按配置次数执行响应式压缩；其他接口异常保持原样交给调用方处理。
+            if (
+                reactive_retries >= MAX_REACTIVE_RETRIES
+                or not _is_context_overflow_error(error)
+            ):
                 raise
-            messages[:] = reactive_compact(messages)
-            reactive_compaction_used = True
+            messages[:] = compact.reactive_compact(messages)
+            reactive_retries += 1
             continue
-        reactive_compaction_used = False
         messages.append({
             "role": "assistant",
             "content": _make_json_safe(response.content),
@@ -117,7 +142,7 @@ def agent_loop(messages: list) -> None:
             # 工具执行成功后先用原始结果触发后置钩子，再把超长文本持久化为文件以控制消息体积。
             trigger_hooks("PostToolUse", block, output)
             if isinstance(output, str):
-                output = persist_large_output(block.id, output)
+                output = compact.persist_large_output(block.id, output)
             # 只有成功更新任务清单才重置提醒计数，错误结果仍保留已经累计的轮次。
             if block.name == "todo_write" and not str(output).startswith("Error:"):
                 rounds_since_todo = 0

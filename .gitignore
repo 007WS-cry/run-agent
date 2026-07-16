@@ -50,3 +50,7 @@ managed-files/
 # Agent 上下文压缩与大工具输出的本地产物
 .transcripts/
 .task_outputs/
+
+# Agent 自动提取的本地持久记忆，可能包含用户偏好和项目上下文；保留可提交的示例文件
+resources/memory/*
+!resources/memory/*.md.example

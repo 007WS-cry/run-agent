@@ -4,7 +4,7 @@ from pathlib import Path
 from anthropic import Anthropic
 from dotenv import load_dotenv
 
-# 本文件负责加载环境变量，并集中定义工作区路径、Anthropic 客户端、模型参数和命令权限配置。
+# 本文件负责加载环境变量，并集中定义工作区与扩展目录、Anthropic 客户端、模型参数和命令权限配置。
 
 # 在模块加载时记录工作区的规范化绝对路径，后续文件工具和系统提示词共用该访问边界。
 WORKDIR = Path.cwd().resolve()
@@ -14,6 +14,21 @@ TRANSCRIPT_DIR = WORKDIR / ".transcripts"
 
 # 保存超长工具结果的目录，发送给模型的消息仅保留文件路径和内容预览。
 TOOL_RESULTS_DIR = WORKDIR / ".task_outputs" / "tool-results"
+
+# 定义技能根目录；每个直接子目录可通过其中的 SKILL.md 声明一个技能。
+SKILLS_DIR = WORKDIR / "resources" / "skills"
+
+# 保存持久记忆文件的目录；每条记忆使用一个带 YAML frontmatter 的 Markdown 文件。
+MEMORY_DIR = WORKDIR / "resources" / "memory"
+
+# 保存记忆名称、简介与文件链接的索引，构建系统提示词时只加载这份简短目录。
+MEMORY_INDEX = MEMORY_DIR / "MEMORY.md"
+
+# 记忆文件达到该数量后请求模型去重合并，避免长期运行后目录无限增长。
+CONSOLIDATE_THRESHOLD = 10
+
+# 单次模型请求因上下文溢出而允许执行的响应式压缩重试次数。
+MAX_REACTIVE_RETRIES = 1
 
 # 优先读取项目的环境变量文件，使本地配置可以覆盖当前进程中的同名变量。
 load_dotenv(override=True)

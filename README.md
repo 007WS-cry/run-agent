@@ -20,13 +20,18 @@ Run Agent 是一个用于学习 AI Agent 基本工作方式的最小项目。程
 
 ```text
 run-agent/
-├── main.py            # Agent 主程序
-├── requirements.txt   # Python 依赖
-├── .env.example       # 环境变量示例
-├── Dockerfile         # 容器镜像定义
-├── .dockerignore      # Docker 构建忽略规则
-├── .gitignore         # Git 忽略规则
-└── README.md           # 项目说明
+├── main.py              # 命令行入口与交互循环
+├── run_agent/
+│   ├── __init__.py      # Python 包标识
+│   ├── config.py        # 环境变量、API 客户端及工具定义
+│   ├── runtime.py       # Agent 调用循环
+│   └── tools.py         # Shell 工具实现
+├── requirements.txt     # Python 依赖
+├── .env.example         # 环境变量示例
+├── Dockerfile           # 容器镜像定义
+├── .dockerignore        # Docker 构建忽略规则
+├── .gitignore           # Git 忽略规则
+└── README.md             # 项目说明
 ```
 
 ## 环境要求

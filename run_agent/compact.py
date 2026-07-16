@@ -5,6 +5,7 @@ import time
 from pathlib import Path
 
 from run_agent.config import MODEL, TOOL_RESULTS_DIR, TRANSCRIPT_DIR, client
+from run_agent.content import extract_text
 
 # 本文件负责控制消息历史规模，包括裁剪旧消息、压缩工具结果、持久化大输出、保存转录和生成历史摘要。
 
@@ -241,13 +242,7 @@ def summarize_history(messages: list[dict]) -> str:
         messages=[{"role": "user", "content": prompt}],
         max_tokens=2_000,
     )
-    text_blocks = []
-    for block in response.content:
-        if isinstance(block, dict) and block.get("type") == "text":
-            text_blocks.append(str(block.get("text", "")))
-        elif getattr(block, "type", None) == "text":
-            text_blocks.append(str(getattr(block, "text", "")))
-    return "\n".join(text_blocks).strip() or "(empty summary)"
+    return extract_text(response.content).strip() or "(empty summary)"
 
 
 # 主动压缩完整历史；先保存转录，再用单条摘要消息替换原有上下文。

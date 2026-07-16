@@ -12,6 +12,7 @@ from run_agent.config import (
     MODEL,
     client,
 )
+from run_agent.content import extract_text
 from run_agent.frontmatter_text import parse_frontmatter
 
 # 本文件负责持久记忆的安全读写、索引维护、相关性筛选、对话信息提取和定期去重合并。
@@ -23,24 +24,6 @@ MEMORY_TYPES = {"user", "feedback", "project", "reference"}
 MAX_MEMORY_NAME_LENGTH = 80
 MAX_MEMORY_DESCRIPTION_LENGTH = 300
 MAX_MEMORY_BODY_LENGTH = 8_000
-
-
-# 兼容字典和 Anthropic SDK 对象两种内容块，只拼接其中的文本内容。
-def extract_text(content) -> str:
-    if content is None:
-        return ""
-    if not isinstance(content, list):
-        return str(content)
-
-    text_blocks = []
-    for block in content:
-        if isinstance(block, dict):
-            if block.get("type") == "text":
-                text_blocks.append(str(block.get("text", "")))
-        elif getattr(block, "type", None) == "text":
-            text_blocks.append(str(getattr(block, "text", "")))
-    return "\n".join(text_blocks)
-
 
 # 将任意文本压成单行并限制长度，防止名称或简介破坏 Markdown 索引结构。
 def _single_line(value: str, limit: int) -> str:

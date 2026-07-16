@@ -1,6 +1,6 @@
 # Run Agent
 
-Run Agent 是一个用于学习 AI Agent 基本工作方式的轻量项目。程序把 Anthropic 模型与一组本地工具连接起来：模型可以读取、编辑和管理工作区文件，也可以执行 Shell 命令、维护 TODO 任务清单、按需加载工作区中的 skills，并跨轮次复用持久记忆；程序会控制超长工具输出和消息历史规模，在输出截断、上下文超限、限流或服务过载时按故障类型自动恢复，并把每次工具执行结果返回给模型，直到模型不再请求工具。
+Run Agent 是一个用于学习 AI Agent 基本工作方式的轻量项目。程序把 Anthropic 模型与一组本地工具连接起来：模型可以读取、编辑和管理工作区文件，也可以执行 Shell 命令、维护 TODO 任务清单、按需加载工作区中的 skills、把独立编码任务委派给受限 Subagent，并跨轮次复用持久记忆；程序会控制超长工具输出和消息历史规模，在输出截断、上下文超限、限流或服务过载时按故障类型自动恢复，并把每次工具执行结果返回给模型，直到模型不再请求工具。
 
 系统提示词在运行时由身份、工具、工作区、skills 和 memory 索引等独立 section 组装，当前将 Agent 定位为文件管理学习助手，适合列出目录、查找文件、查看文件信息，以及读取、解释和管理工作区中的内容。
 
@@ -10,8 +10,9 @@ Run Agent 是一个用于学习 AI Agent 基本工作方式的轻量项目。程
 ## 功能
 
 - 通过 Anthropic Messages API 与模型交互
-- 支持 Bash、读取、编辑、写入、删除、复制、移动、TODO 管理和技能加载共 9 个工具
+- 支持 Bash、读取、编辑、写入、删除、复制、移动、TODO 管理、Subagent 委派和技能加载共 10 个工具
 - 通过工具处理器映射统一分发模型的工具调用
+- 支持通过 `task` 把自包含的编码任务交给 Subagent；子任务共享当前工作区和权限 hooks，但不能再次创建 Subagent
 - 支持用 `todo_write` 整体更新内存任务清单，并在连续三个工具调用轮次未更新时提醒模型维护 TODO
 - 将工具 Schema/处理器映射和 hooks 事件注册表分别放在 `tools_config.py`、`hooks_config.py` 中，避免通用配置模块承担运行时注册职责
 - 按真实运行状态分段组装 system prompt，并通过确定性上下文键复用未变化的组装结果
@@ -47,9 +48,19 @@ Run Agent 是一个用于学习 AI Agent 基本工作方式的轻量项目。程
 | `copy_file` | 复制文件并按需创建目标父目录；目标已经存在时拒绝执行 |
 | `move_file` | 移动或重命名文件并按需创建目标父目录；目标已经存在时拒绝执行 |
 | `todo_write` | 创建或整体替换当前 TODO 清单，在终端显示任务内容和状态 |
+| `task` | 把完整、独立的编码任务交给受限 Subagent，并把其最终文本总结返回给主 Agent |
 | `load_skill` | 按系统提示词中展示的精确技能名称读取完整 `SKILL.md` 说明 |
 
 文件工具接受工作区相对路径或绝对路径，但路径解析后的结果必须仍在工作区内。所有工具都会返回字符串结果，执行错误也会以 `Error:` 开头的字符串反馈给模型。超长工具结果成功写入磁盘后，模型收到的字符串会包含完整结果文件路径和前 2,000 个字符的预览；工作区不可写时保留原始结果，不会因持久化失败中断主流程。
+
+## Subagent 委派
+
+主 Agent 调用 `task` 时需要提供非空的 `description`，其中应包含可独立执行的目标、必要上下文和预期结果。Subagent 使用与主 Agent 相同的模型、API 客户端和工作区，最多执行 30 轮模型请求；完成后只把最终文本总结作为 `tool_result` 返回给主 Agent，主对话不会直接合并 Subagent 的内部消息历史。
+
+Subagent 只能使用 `bash`、`read_file`、`edit_file`、`write_file`、`delete_file`、`copy_file` 和 `move_file`。它不能调用 `task`、`todo_write` 或 `load_skill`，因此不会递归创建更多 Agent，也不会修改主 Agent 的 TODO 状态。子任务中的工具调用仍会触发 `PreToolUse` 和 `PostToolUse` hooks；被权限 hook 拒绝的调用不会执行，拒绝原因会返回给 Subagent。若 30 轮后仍没有最终回复，`task` 会返回以 `Error:` 开头的明确错误。
+
+> [!IMPORTANT]
+> Subagent 不是隔离沙箱。它与主 Agent 共享工作区，调用文件工具或 Shell 时可能直接修改文件；只读 Docker 挂载同样会限制它的写入工具，但不能把简单的命令字符串检查视为完整安全边界。
 
 ## System Prompt 运行时组装
 
@@ -215,6 +226,7 @@ run-agent/
 │   ├── __init__.py      # Python 包标识
 │   ├── compact.py       # 消息裁剪、工具结果持久化、转录及历史摘要
 │   ├── config.py        # 工作区路径、环境变量、API 客户端及命令权限配置
+│   ├── content.py       # Anthropic 字典与 SDK 内容块的公共文本提取
 │   ├── frontmatter_text.py # skills 与 memories 共用的 YAML frontmatter 解析
 │   ├── hooks/
 │   │   ├── __init__.py      # hooks 公共导入入口
@@ -225,6 +237,7 @@ run-agent/
 │   ├── recovery.py      # 模型错误分类、退避重试、备用模型及恢复状态
 │   ├── runtime.py       # Agent 调用循环、记忆注入、错误恢复与 hooks 触发点
 │   ├── skills.py        # 技能扫描及按需加载
+│   ├── subagent.py      # 受限 Subagent 对话循环、工具执行及最终总结提取
 │   ├── todos.py         # TODO 输入规范化、内存状态及终端展示
 │   └── tools/
 │       ├── __init__.py      # 文件与 Shell 工具公共导入入口
@@ -237,11 +250,13 @@ run-agent/
 │   ├── unit/
 │   │   ├── test_agent.py            # Agent 运行时单元测试
 │   │   ├── test_compact.py          # 上下文压缩、转录及溢出重试单元测试
+│   │   ├── test_content.py          # 公共内容块文本提取及兼容导入测试
 │   │   ├── test_hooks.py            # 生命周期钩子及权限流程单元测试
 │   │   ├── test_memories.py         # 记忆读写、筛选、提取、合并及注入单元测试
 │   │   ├── test_prompt.py           # 系统提示词组装、缓存及运行时刷新单元测试
 │   │   ├── test_recovery.py         # 模型错误分类、退避、切换及截断续写单元测试
 │   │   ├── test_skills.py           # 技能解析、扫描、加载及注册单元测试
+│   │   ├── test_subagent.py         # Subagent 工具范围、消息协议、权限及轮数限制测试
 │   │   ├── test_todo.py             # TODO 工具、输入校验及提醒流程单元测试
 │   │   └── test_tools.py            # 本地工具单元测试
 │   ├── integration/
@@ -347,7 +362,7 @@ python -m pytest tests/unit -v
 python -m pytest tests/integration -v
 ```
 
-测试通过临时目录隔离文件操作，并模拟 Anthropic 客户端，因此不会访问真实模型 API，也不会改动项目中的业务文件。hooks 测试会模拟用户审批输入，验证禁止命令不会询问、破坏性命令默认拒绝，以及运行时不会执行被拦截的工具；prompt 测试会验证 section 顺序、memory 按需加载、确定性缓存、真实状态采集和工具轮次之间的刷新；skills 测试会验证 frontmatter 容错、目录扫描、重扫清理、提示词目录、按需加载和工具注册；memory 测试会验证安全文件名、路径穿越防护、UTF-8 索引、模型筛选及本地降级、提取校验、安全合并和请求副本注入；TODO 测试会验证工具 Schema、任务状态替换、字符串输入兼容、异常输入保护、三轮提醒和成功更新后的计数器重置；compact 测试会验证工具消息对边界、微压缩、安全文件名、结果预算、唯一转录、摘要生成、上下文溢出重试和非上下文异常透传；recovery 测试会验证 `Retry-After`、指数退避、重试上限、备用模型切换、截断内容丢弃和续写次数边界。`pytest.ini` 会把临时测试文件放在项目内的 `.pytest_tmp` 目录，该目录已被 Git 和 Docker 忽略。
+测试通过临时目录隔离文件操作，并模拟 Anthropic 客户端，因此不会访问真实模型 API，也不会改动项目中的业务文件。content 测试会验证字典与 SDK 内容块的公共文本提取及旧导入入口兼容性；hooks 测试会模拟用户审批输入，验证禁止命令不会询问、破坏性命令默认拒绝，以及运行时不会执行被拦截的工具；prompt 测试会验证 section 顺序、memory 按需加载、确定性缓存、真实状态采集和工具轮次之间的刷新；skills 测试会验证 frontmatter 容错、目录扫描、重扫清理、提示词目录、按需加载和工具注册；Subagent 测试会验证工具范围、延迟处理器、多工具结果分组、权限拒绝和轮数上限；memory 测试会验证安全文件名、路径穿越防护、UTF-8 索引、模型筛选及本地降级、提取校验、安全合并和请求副本注入；TODO 测试会验证工具 Schema、任务状态替换、字符串输入兼容、异常输入保护、三轮提醒和成功更新后的计数器重置；compact 测试会验证工具消息对边界、微压缩、安全文件名、结果预算、唯一转录、摘要生成、上下文溢出重试和非上下文异常透传；recovery 测试会验证 `Retry-After`、指数退避、重试上限、备用模型切换、截断内容丢弃和续写次数边界。`pytest.ini` 会把临时测试文件放在项目内的 `.pytest_tmp` 目录，该目录已被 Git 和 Docker 忽略。
 
 ## Docker 运行
 
@@ -382,16 +397,18 @@ docker run --rm -it --env-file .env -v "D:\path\to\workspace:/workspace:ro" run-
 5. 若服务端报告上下文溢出，程序响应式压缩并按 `MAX_REACTIVE_RETRIES` 重试；若响应因 `max_tokens` 截断，则先升级输出上限，再按次数追加续写提示。
 6. 如果模型请求调用工具，先触发 `PreToolUse` 完成权限检查和调用日志记录。
 7. 权限检查通过后，程序根据 `TOOL_HANDLERS` 注册表找到对应函数并执行；被拒绝的调用会跳过执行。相关技能的完整说明也在此阶段通过 `load_skill` 按需获取。
-8. 模型进入工具调用轮次时增加 TODO 提醒计数；成功执行 `todo_write` 时清零，累计三轮未更新时在下一次请求前插入提醒。
-9. 工具执行完成后先用原始结果触发 `PostToolUse`；超长字符串随后落盘，再作为 `tool_result` 加入消息历史并返回给模型。
-10. 下一次请求重新采集 system prompt 上下文；工具造成的 skill 或 memory 变化会触发重新组装，否则命中本地缓存。
-11. 重复上述过程，直到模型给出最终回答；此时触发 `Stop` 输出会话工具调用统计。
-12. CLI 先展示最终回答，再提取本轮新增记忆；达到合并阈值时校验并写入精简结果，最后更新 `MEMORY.md`。
+8. 调用 `task` 时启动受限 Subagent；子任务在同一工作区内循环请求模型和执行基础工具，完成后把文本总结交回主 Agent，达到 30 轮仍未结束则返回错误。
+9. 模型进入工具调用轮次时增加 TODO 提醒计数；成功执行 `todo_write` 时清零，累计三轮未更新时在下一次请求前插入提醒。
+10. 工具执行完成后先用原始结果触发 `PostToolUse`；超长字符串随后落盘，再作为 `tool_result` 加入消息历史并返回给模型。
+11. 下一次请求重新采集 system prompt 上下文；工具造成的 skill 或 memory 变化会触发重新组装，否则命中本地缓存。
+12. 重复上述过程，直到模型给出最终回答；此时触发 `Stop` 输出会话工具调用统计。
+13. CLI 先展示最终回答，再提取本轮新增记忆；达到合并阈值时校验并写入精简结果，最后更新 `MEMORY.md`。
 
 ## 安全建议
 
 - 优先在临时目录、虚拟机或 Docker 容器中运行。
 - 对不需要修改的工作区使用只读挂载。
+- 把委派说明写成边界明确的独立任务，并在执行后检查 Subagent 对共享工作区产生的文件改动。
 - 不要把 `DENY_LIST` 和 `DESTRUCTIVE` 当作完整安全边界；字符串拼接、Shell 展开或其他命令变体可能绕过简单匹配。
 - 文件工具虽然会校验工作区边界，但 Shell 工具仍可能绕过该边界。
 - 不要让 Agent 接触 SSH 密钥、云凭据、生产配置或个人隐私文件。

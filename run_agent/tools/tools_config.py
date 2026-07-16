@@ -171,6 +171,23 @@ TOOLS = [
             "additionalProperties": False,
         }
     },
+    # 声明把独立编码任务委派给受限 Subagent 的工具；任务说明不能为空，也不接受未声明的额外参数。
+    {
+        "name": "task",
+        "description": "Delegate a self-contained coding task to a subagent and return its final summary.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "A complete, self-contained description of the coding task.",
+                }
+            },
+            "required": ["description"],
+            "additionalProperties": False,
+        }
+    },
     # 声明按名称加载完整技能说明的工具；名称必须来自系统提示词中的启动时技能目录。
     {
         "name": "load_skill",
@@ -190,6 +207,39 @@ TOOLS = [
     }
 ]
 
+# 保存 Subagent 可以调用的基础工具名称；排除 task、TODO 和技能工具以限制职责并阻止递归委派。
+SUBTOOL_NAMES = frozenset({
+    "bash",
+    "read_file",
+    "edit_file",
+    "write_file",
+    "delete_file",
+    "copy_file",
+    "move_file",
+})
+
+# 从主工具 Schema 中筛选 Subagent 工具，复用同一份参数约束以避免两套声明逐渐不一致。
+SUBTOOLS = [tool for tool in TOOLS if tool["name"] in SUBTOOL_NAMES]
+
+# 将 Subagent 可用工具名称映射到已有本地实现，确保子任务使用与主 Agent 相同的路径和权限边界。
+SUBTOOL_HANDLERS = {
+    "bash": run_bash,
+    "read_file": run_read_file,
+    "edit_file": run_edit_file,
+    "write_file": run_write_file,
+    "copy_file": run_copy_file,
+    "move_file": run_move_file,
+    "delete_file": run_delete_file,
+}
+
+
+# 延迟导入 Subagent 入口并执行委派任务，避免工具配置与 Subagent 模块在初始化阶段形成循环依赖。
+def run_task(description: str) -> str:
+    from run_agent.subagent import spawn_subagent
+
+    return spawn_subagent(description)
+
+
 # 将模型返回的工具名称映射到本地实现，运行时据此查找并执行对应函数。
 TOOL_HANDLERS = {
     "bash": run_bash,
@@ -200,5 +250,6 @@ TOOL_HANDLERS = {
     "move_file": run_move_file,
     "delete_file": run_delete_file,
     "todo_write": run_todo_write,
+    "task": run_task,
     "load_skill": load_skill,
 }

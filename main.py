@@ -1,4 +1,5 @@
 from run_agent.runtime import agent_loop
+from run_agent.hooks import trigger_hooks
 
 # 本文件是项目的命令行入口，负责持续读取用户输入、维护对话历史、调用 Agent 循环并输出模型的文本回复。
 
@@ -16,6 +17,8 @@ if __name__ == "__main__":
             break
         if query.strip().lower() in ("q", "exit", ""):
             break
+        # 用户问题进入消息历史前触发提交钩子，打印本轮任务所处的工作区上下文。
+        trigger_hooks("UserPromptSubmit", query)
         history.append({"role": "user", "content": query})
         agent_loop(history)
         response_content = history[-1]["content"]

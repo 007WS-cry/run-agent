@@ -158,3 +158,17 @@ TOOL_HANDLERS = {
     "move_file": run_move_file,
     "delete_file": run_delete_file,
 }
+
+# 定义生命周期事件与回调列表的注册表，hooks 模块会按事件名称向其中追加处理函数。
+HOOKS = {
+    "UserPromptSubmit": [],
+    "PreToolUse": [],
+    "PostToolUse": [],
+    "Stop": [],
+}
+
+# 配置 Shell 命令硬禁止列表；命中任意片段时不向用户询问，直接拒绝执行。
+DENY_LIST = ["rm -rf /", "sudo", "shutdown", "reboot", "mkfs", "dd if="]
+
+# 配置需要人工确认的破坏性命令片段；只有用户明确输入 y 或 yes 后才会放行。
+DESTRUCTIVE = ["rm ", "> /etc/", "chmod 777"]

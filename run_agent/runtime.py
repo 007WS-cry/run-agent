@@ -1,4 +1,5 @@
 from run_agent.config import client, MODEL, SYSTEM, TOOLS, TOOL_HANDLERS
+from run_agent.hooks import trigger_hooks
 
 # 本文件负责驱动 Agent 对话循环，将消息发送给模型、执行模型请求的本地工具，并把执行结果写回对话历史。
 
@@ -44,19 +45,35 @@ def agent_loop(messages: list) -> None:
             "content": _make_json_safe(response.content),
         })
         if response.stop_reason != "tool_use":
+            # 最终回答产生后触发停止钩子；钩子返回补充消息时继续下一轮，否则结束本次 Agent 循环。
+            force = trigger_hooks("Stop", messages)
+            if force:
+                messages.append({"role": "user", "content": str(force)})
+                continue
             return
         results = []
         for block in response.content:
-            if block.type == "tool_use":
-                print(f"\033[33m> {block.name}\033[0m")
-                handler = TOOL_HANDLERS.get(block.name)
-                tool_input = _make_json_safe(block.input)
-                output = handler(**tool_input) if handler else f"Unknown: {block.name}"
-                output = _make_json_safe(output)
-                print(str(output)[:200])
+            if block.type != "tool_use":
+                continue
+            # 工具执行前先运行权限与日志钩子；非空结果表示本次调用被拦截，并作为工具结果反馈给模型。
+            blocked = trigger_hooks("PreToolUse", block)
+            if blocked:
                 results.append({
                     "type": "tool_result",
                     "tool_use_id": _repair_unicode(block.id),
-                    "content": output,
+                    "content": str(blocked),
                 })
+                continue
+            handler = TOOL_HANDLERS.get(block.name)
+            tool_input = _make_json_safe(block.input)
+            output = handler(**tool_input) if handler else f"Unknown: {block.name}"
+            output = _make_json_safe(output)
+            # 工具执行成功后触发后置钩子，用于观察输出规模等信息，但不改变原始工具结果。
+            trigger_hooks("PostToolUse", block, output)
+            print(str(output)[:200])
+            results.append({
+                "type": "tool_result",
+                "tool_use_id": _repair_unicode(block.id),
+                "content": output,
+            })
         messages.append({"role": "user", "content": results})

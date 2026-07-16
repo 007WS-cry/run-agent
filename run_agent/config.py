@@ -12,6 +12,8 @@ from run_agent.tools import (
     run_todo_write,
     run_write_file,
 )
+from run_agent.prompt import build_system
+from run_agent.skills import load_skill
 
 # 本文件负责加载环境变量、初始化 Anthropic 客户端，并集中定义模型参数、系统提示词、工具描述和处理器映射。
 
@@ -28,7 +30,7 @@ client = Anthropic(base_url=os.getenv("ANTHROPIC_BASE_URL"))
 MODEL = os.environ["MODEL_ID"]
 
 # 定义 Agent 的职责、工作区边界和回复语言要求，供每次模型请求统一使用。
-SYSTEM = f"You are an educational file-management agent that helps users safely explore the workspace rooted at {WORKDIR} by listing directories, locating files, inspecting file metadata, and reading or explaining file contents while clearly describing each operation and never accessing paths outside the workspace.Your final answer must always be written in the same language as the user’s query."
+SYSTEM = build_system()
 
 # 使用 Anthropic 工具调用格式声明全部可用工具及其参数约束，让模型能够生成结构化调用请求。
 TOOLS = [
@@ -188,6 +190,23 @@ TOOLS = [
             "required": ["todos"],
             "additionalProperties": False,
         }
+    },
+    # 声明按名称加载完整技能说明的工具；名称必须来自系统提示词中的启动时技能目录。
+    {
+        "name": "load_skill",
+        "description": "Load the complete SKILL.md instructions for an available skill by its catalog name.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "The exact skill name shown in the available skills catalog.",
+                }
+            },
+            "required": ["name"],
+            "additionalProperties": False,
+        }
     }
 ]
 
@@ -201,6 +220,7 @@ TOOL_HANDLERS = {
     "move_file": run_move_file,
     "delete_file": run_delete_file,
     "todo_write": run_todo_write,
+    "load_skill": load_skill,
 }
 
 # 定义生命周期事件与回调列表的注册表，hooks 模块会按事件名称向其中追加处理函数。
